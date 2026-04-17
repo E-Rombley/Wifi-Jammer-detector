@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #include <libhackrf/hackrf.h>
 
