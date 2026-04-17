@@ -75,6 +75,7 @@ void init_channels(void) {
 int rx_callback(hackrf_transfer *transfer) {
     int8_t *s   = (int8_t *)transfer->buffer;
     int     len = transfer->valid_length;
+    if (len < 2) return 0;
     double  p   = 0.0;
 
     for (int i = 0; i + 1 < len; i += 2) {
@@ -87,57 +88,88 @@ int rx_callback(hackrf_transfer *transfer) {
     return 0;
 }
 
-// Tune to every channel, collect 100ms of samples each, return power array.
-// Caller passes out[TOTAL_CHANNELS] to be filled.
-void scan_once(float out[TOTAL_CHANNELS]) {
+// Open HackRF once and return the handle. Caller must call hackrf_device_close().
+static hackrf_device *hackrf_open_device(void) {
     hackrf_device *dev = NULL;
-
-    if (hackrf_init() != HACKRF_SUCCESS) return;
-    if (hackrf_open(&dev) != HACKRF_SUCCESS) { hackrf_exit(); return; }
-
+    if (hackrf_init() != HACKRF_SUCCESS) {
+        fprintf(stderr, "[!] hackrf_init failed\n");
+        return NULL;
+    }
+    if (hackrf_open(&dev) != HACKRF_SUCCESS) {
+        fprintf(stderr, "[!] hackrf_open failed\n");
+        hackrf_exit();
+        return NULL;
+    }
     hackrf_set_sample_rate(dev, SAMPLE_RATE);
     hackrf_set_amp_enable(dev, 0);
     hackrf_set_lna_gain(dev, LNA_GAIN);
     hackrf_set_vga_gain(dev, VGA_GAIN);
+    return dev;
+}
 
+static void hackrf_close_device(hackrf_device *dev) {
+    hackrf_close(dev);
+    hackrf_exit();
+}
+
+// Tune to every channel using an already-open device, fill out[TOTAL_CHANNELS].
+static void scan_with_device(hackrf_device *dev, float out[TOTAL_CHANNELS]) {
     for (int i = 0; i < TOTAL_CHANNELS; i++) {
         uint64_t hz = (uint64_t)(channels[i].frequency * 1e6);
         hackrf_set_freq(dev, hz);
         current_ch_idx = i;
         hackrf_start_rx(dev, rx_callback, NULL);
-        struct timespec ts = {0, 100000000L};
+        struct timespec ts = {0, 100000000L};  // 100ms
         nanosleep(&ts, NULL);
         hackrf_stop_rx(dev);
         out[i] = channels[i].current;
     }
+}
 
-    hackrf_close(dev);
-    hackrf_exit();
+// One-shot scan (opens and closes HackRF).
+void scan_once(float out[TOTAL_CHANNELS]) {
+    hackrf_device *dev = hackrf_open_device();
+    if (!dev) return;
+    scan_with_device(dev, out);
+    hackrf_close_device(dev);
 }
 
 // Scan a single channel and return its power (used during triangulation).
 float scan_channel(int ch_idx) {
     float buf[TOTAL_CHANNELS] = {0};
-    // Only need one channel — still do a full scan but return just that slot
-    // (re-opening HackRF is the safe approach with the libhackrf streaming API)
     scan_once(buf);
     return buf[ch_idx];
 }
 
 // ─── Phase 1: Baseline ────────────────────────────────────────────────────────
 
-void build_baseline(void) {
+// Returns false if HackRF failed or all readings were zero.
+bool build_baseline(void) {
     printf("\n[baseline] Collecting %d scans to establish noise floor...\n",
            BASELINE_SAMPLES);
+
+    hackrf_device *dev = hackrf_open_device();
+    if (!dev) return false;
 
     float acc[TOTAL_CHANNELS] = {0};
 
     for (int s = 0; s < BASELINE_SAMPLES; s++) {
-        float out[TOTAL_CHANNELS];
-        scan_once(out);
+        float out[TOTAL_CHANNELS] = {0};
+        scan_with_device(dev, out);
         for (int i = 0; i < TOTAL_CHANNELS; i++)
             acc[i] += out[i];
         printf("[baseline] scan %d/%d done\n", s + 1, BASELINE_SAMPLES);
+    }
+
+    hackrf_close_device(dev);
+
+    // Validate — if all zero the device didn't deliver samples
+    float total = 0.0f;
+    for (int i = 0; i < TOTAL_CHANNELS; i++) total += acc[i];
+    if (total == 0.0f) {
+        fprintf(stderr, "[!] Baseline got only zero readings — "
+                "check HackRF connection.\n");
+        return false;
     }
 
     for (int i = 0; i < TOTAL_CHANNELS; i++) {
@@ -147,6 +179,7 @@ void build_baseline(void) {
                power_to_db(channels[i].baseline));
     }
     printf("[baseline] Done.\n\n");
+    return true;
 }
 
 // ─── Phase 2: Continuous monitor ─────────────────────────────────────────────
@@ -263,7 +296,7 @@ int main(void) {
     init_channels();
 
     // ── Phase 1: baseline ──
-    build_baseline();
+    if (!build_baseline()) return 1;
 
     // ── Phase 2: monitor until jamming found ──
     printf("[monitor] Scanning continuously. Press Ctrl+C to stop.\n");
