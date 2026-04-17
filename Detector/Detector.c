@@ -19,8 +19,8 @@
 #define DEAUTH_THRESHOLD 50       // frames from same MAC within TIME_WINDOW = attack
 #define TIME_WINDOW      1        // seconds
 #define SAMPLE_RATE      20000000 // 20 MHz
-#define BASEBAND_GAIN    32
-#define IF_GAIN          40
+#define LNA_GAIN         40
+#define VGA_GAIN         32
 
 // ─── Structs ─────────────────────────────────────────────────────────────────
 
@@ -33,7 +33,7 @@ struct frames {
 struct channel {
     int   channel_number;
     float frequency;   // MHz
-    float sigstr;      // signal strength (lower = cleaner)
+    float noise_floor; // measured power (lower = cleaner)
 };
 
 // ─── Globals ─────────────────────────────────────────────────────────────────
@@ -48,19 +48,19 @@ int frame_count = 0;
 void init_channels(void) {
     for (int i = 0; i < TOTAL_CHANNELS; i++) {
         channels[i].channel_number = i + 1;
-        channels[i].frequency      = 2412.0f + i * 5.0f;  // MHz
-        channels[i].sigstr         = 0.0f;
+        channels[i].frequency      = (i < 13) ? 2412.0f + i * 5.0f : 2484.0f;  // ch14 is +12 MHz from ch13
+        channels[i].noise_floor    = 0.0f;
     }
 }
 
 // Return the channel number with the lowest measured signal strength
 int get_cleanest_channel(void) {
     int   best_channel = 1;
-    float lowest_sig   = channels[0].sigstr;
+    float lowest_sig   = channels[0].noise_floor;
 
     for (int i = 1; i < TOTAL_CHANNELS; i++) {
-        if (channels[i].sigstr < lowest_sig) {
-            lowest_sig   = channels[i].sigstr;
+        if (channels[i].noise_floor < lowest_sig) {
+            lowest_sig   = channels[i].noise_floor;
             best_channel = channels[i].channel_number;
         }
     }
@@ -78,12 +78,9 @@ void switch_channel(int channel_num) {
 
 // ─── HackRF RX Callback ──────────────────────────────────────────────────────
 
-// Called by HackRF with each buffer of IQ samples.
-// Computes average signal power and stores it in the matching channel slot.
-// In a full implementation you would tune the HackRF to each channel frequency
-// before reading samples; here we accumulate power across all samples.
+int current_channel_idx = 0;  // set by scan_spectrum before each hackrf_start_rx
+
 int rx_callback(hackrf_transfer *transfer) {
-    static int current_channel_idx = 0;
 
     int8_t  *samples = (int8_t *)transfer->buffer;
     int      len     = transfer->valid_length;
@@ -97,9 +94,8 @@ int rx_callback(hackrf_transfer *transfer) {
     }
     power /= (len / 2);
 
-    // Store into current channel and advance
-    channels[current_channel_idx].sigstr = (float)power;
-    current_channel_idx = (current_channel_idx + 1) % TOTAL_CHANNELS;
+    // Store power into the channel this callback was registered for
+    channels[current_channel_idx].noise_floor = (float)power;
 
     return 0;  // 0 = keep receiving
 }
@@ -126,14 +122,15 @@ void scan_spectrum(void) {
 
     hackrf_set_sample_rate(device, SAMPLE_RATE);
     hackrf_set_amp_enable(device, 0);
-    hackrf_set_lna_gain(device, BASEBAND_GAIN);
-    hackrf_set_vga_gain(device, IF_GAIN);
+    hackrf_set_lna_gain(device, LNA_GAIN);
+    hackrf_set_vga_gain(device, VGA_GAIN);
 
     // Tune to each channel and collect a short burst of samples
     for (int i = 0; i < TOTAL_CHANNELS; i++) {
         uint64_t freq_hz = (uint64_t)(channels[i].frequency * 1e6);
         hackrf_set_freq(device, freq_hz);
 
+        current_channel_idx = i;  // pin callback to the channel we just tuned
         hackrf_start_rx(device, rx_callback, NULL);
         // Collect for ~100ms per channel
         struct timespec ts = {0, 100000000L};
@@ -143,7 +140,7 @@ void scan_spectrum(void) {
         printf("[scan] Channel %2d (%.0f MHz) — power: %.2f\n",
                channels[i].channel_number,
                channels[i].frequency,
-               channels[i].sigstr);
+               channels[i].noise_floor);
     }
 
     hackrf_close(device);
@@ -231,16 +228,3 @@ int main(void) {
     printf("[*] Done.\n");
     return 0;
 }
-
-
-/*
-    // IFF_TUN = TUN device (layer 3)
-    // IFF_NO_PI = no packet information (simpler)
--- closing statements for the database 
-
-Expect: demonstrate topics: showcase what I have written down, fully understand the canvas summary.
-So explain. Prep a demonstration for her...Build from scratch. To show that I understand. Show a connection in a creative way. Payload development. 
-
-peer to peer from blue team to red team.
-
-*/
