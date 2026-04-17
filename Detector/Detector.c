@@ -16,6 +16,7 @@
 #include <time.h>
 #include <stdint.h>
 #include <math.h>
+#include <unistd.h>
 #include <signal.h>
 #include <pthread.h>
 #include <pcap/pcap.h>
