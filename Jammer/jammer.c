@@ -10,7 +10,7 @@
 // Compile: gcc -o jammer jammer.c -lhackrf -lm
 // Usage:
 //   sudo ./jammer deauth <iface> <target_bssid> <client_mac>
-//   sudo ./jammer rf     <channel 1-14>
+//   sudo ./jammer rf     <channel>   (2.4GHz: 1-14 | 5GHz: 36,40,44,48,52,56,60,64,100-144,149-165)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,8 +47,14 @@ static bool parse_mac(const char *str, uint8_t out[6]) {
 }
 
 static float channel_to_freq(int ch) {
-    if (ch >= 1 && ch <= 13) return 2412.0f + (ch - 1) * 5.0f;
+    // 2.4GHz
+    if (ch >= 1  && ch <= 13) return 2412.0f + (ch - 1) * 5.0f;
     if (ch == 14)             return 2484.0f;
+    // 5GHz: standard channels use freq = 5000 + ch*5 MHz
+    if ((ch >= 36 && ch <= 64  && ch % 4 == 0) ||
+        (ch >= 100&& ch <= 144 && ch % 4 == 0) ||
+        (ch >= 149&& ch <= 165 && (ch - 149) % 4 == 0))
+        return 5000.0f + ch * 5.0f;
     return 0.0f;
 }
 
@@ -185,7 +191,7 @@ static void usage(const char *prog) {
     fprintf(stderr,
         "Usage:\n"
         "  sudo %s deauth <iface> <bssid> <client_mac>\n"
-        "  sudo %s rf     <channel 1-14>\n"
+        "  sudo %s rf     <channel>  (2.4GHz: 1-14 | 5GHz: 36,40,44,48,52..165)\n"
         "\n"
         "Examples:\n"
         "  sudo %s deauth wlan0 AA:BB:CC:DD:EE:FF FF:EE:DD:CC:BB:AA\n"

@@ -20,7 +20,7 @@
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-#define TOTAL_CHANNELS      14
+#define TOTAL_CHANNELS      39   // 14 x 2.4GHz + 25 x 5GHz
 #define SAMPLE_RATE         20000000   // 20 MHz
 #define LNA_GAIN            40
 #define VGA_GAIN            32
@@ -62,12 +62,29 @@ static float power_to_db(float linear) {
     return 10.0f * log10f(linear);
 }
 
+// Standard 5GHz channel numbers (formula: freq = 5000 + ch*5 MHz)
+static const int ch5ghz[] = {
+    36, 40, 44, 48,                          // UNII-1
+    52, 56, 60, 64,                          // UNII-2A
+    100,104,108,112,116,120,124,128,132,136,140,144,  // UNII-2C
+    149,153,157,161,165                      // UNII-3
+};
+
 void init_channels(void) {
-    for (int i = 0; i < TOTAL_CHANNELS; i++) {
+    // 2.4GHz channels 1-14
+    for (int i = 0; i < 14; i++) {
         channels[i].number    = i + 1;
         channels[i].frequency = (i < 13) ? 2412.0f + i * 5.0f : 2484.0f;
         channels[i].baseline  = 0.0f;
         channels[i].current   = 0.0f;
+    }
+    // 5GHz channels
+    int n5 = (int)(sizeof(ch5ghz) / sizeof(ch5ghz[0]));
+    for (int i = 0; i < n5; i++) {
+        channels[14 + i].number    = ch5ghz[i];
+        channels[14 + i].frequency = 5000.0f + ch5ghz[i] * 5.0f;
+        channels[14 + i].baseline  = 0.0f;
+        channels[14 + i].current   = 0.0f;
     }
 }
 
@@ -113,7 +130,6 @@ static void hackrf_close_device(hackrf_device *dev) {
     hackrf_exit();
 }
 
-// Tune to every channel using an already-open device, fill out[TOTAL_CHANNELS].
 static void scan_with_device(hackrf_device *dev, float out[TOTAL_CHANNELS]) {
     for (int i = 0; i < TOTAL_CHANNELS; i++) {
         uint64_t hz = (uint64_t)(channels[i].frequency * 1e6);
