@@ -231,7 +231,7 @@ void packet_handler(u_char *user, const struct pcap_pkthdr *hdr,
     // Skip radiotap header (length is at bytes 2-3, little-endian)
     if (hdr->caplen < 4) return;
     uint16_t radiotap_len = pkt[2] | (pkt[3] << 8);
-    if (hdr->caplen < radiotap_len + (int)sizeof(struct dot11_hdr)) return;
+    if (hdr->caplen < (uint32_t)(radiotap_len + sizeof(struct dot11_hdr))) return;
 
     const struct dot11_hdr *dot11 =
         (const struct dot11_hdr *)(pkt + radiotap_len);
