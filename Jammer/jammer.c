@@ -21,6 +21,7 @@
 #include <signal.h>
 #include <math.h>
 #include <time.h>
+#include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <linux/if_packet.h>
