@@ -1,63 +1,236 @@
-//SUMMARY
-//The sdr would be actively scanning the spectrum for 
-//channels to migrate to in case of an attack, a deauth
-//attack happens and the raspberry picks it up and switches
-//channels.
+// SUMMARY
+// The SDR actively scans the 2.4GHz spectrum to find clean channels.
+// When a deauth attack is detected (50+ deauth frames from same MAC in 1 second),
+// it switches wlan1 to the cleanest available channel.
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
 #include <time.h>
+#include <stdint.h>
+#include <math.h>
 #include <libhackrf/hackrf.h>
 
+// ─── Constants ───────────────────────────────────────────────────────────────
 
+#define MAX_FRAMES       255
+#define TOTAL_CHANNELS   14
+#define DEAUTH_THRESHOLD 50       // frames from same MAC within TIME_WINDOW = attack
+#define TIME_WINDOW      1        // seconds
+#define SAMPLE_RATE      20000000 // 20 MHz
+#define BASEBAND_GAIN    32
+#define IF_GAIN          40
+
+// ─── Structs ─────────────────────────────────────────────────────────────────
 
 struct frames {
-    uint8_t mac[6];
-    time_t current_time;
-    int counter;
-}
-
-struct frames frame[255];
+    uint8_t  mac[6];
+    time_t   first_seen;
+    int      counter;
+};
 
 struct channel {
-    int channel_number;
-    float frequency;
-    float sigstr;
-}
+    int   channel_number;
+    float frequency;   // MHz
+    float sigstr;      // signal strength (lower = cleaner)
+};
 
+// ─── Globals ─────────────────────────────────────────────────────────────────
 
-struct channel channels[54];
+struct frames  frame[MAX_FRAMES];
+struct channel channels[TOTAL_CHANNELS];
+int frame_count = 0;
 
-bool found_match = false;
-int count = 0;
-int matched_index = -1;
-for (int i = 0; i < count; i++) { 
-    if (memcmp(frame[i].mac, incoming_mac, 6) == 0 ){
-        frame[i].counter++; 
-        found_match = true;
-        matched_index = i; 
+// ─── Channel Utilities ───────────────────────────────────────────────────────
+
+// Populate channel list with standard 2.4GHz Wi-Fi channels
+void init_channels(void) {
+    for (int i = 0; i < TOTAL_CHANNELS; i++) {
+        channels[i].channel_number = i + 1;
+        channels[i].frequency      = 2412.0f + i * 5.0f;  // MHz
+        channels[i].sigstr         = 0.0f;
     }
 }
-if (!found_match){ 
-    memcpy(frame[i].mac, incoming_mac, 6); 
-    frame[count].counter++;  
-    matched_index = count;
-    count++;
+
+// Return the channel number with the lowest measured signal strength
+int get_cleanest_channel(void) {
+    int   best_channel = 1;
+    float lowest_sig   = channels[0].sigstr;
+
+    for (int i = 1; i < TOTAL_CHANNELS; i++) {
+        if (channels[i].sigstr < lowest_sig) {
+            lowest_sig   = channels[i].sigstr;
+            best_channel = channels[i].channel_number;
+        }
+    }
+    return best_channel;
 }
 
-time_t now = time(NULL); 
-time_t elapsed_time = now - frame[i].current_time;
-if (frame[matched_index].counter >= 50 && elapsed_time <= 1){
-    printf("ATTACK INCOMING!!!");
-    system("iw wlan1 set channel 6");
+// Switch wlan1 to a given channel number
+void switch_channel(int channel_num) {
+    char cmd[64];
+    snprintf(cmd, sizeof(cmd), "iw wlan1 set channel %d", channel_num);
+    printf("[*] Switching to channel %d (%.0f MHz)...\n",
+           channel_num, channels[channel_num - 1].frequency);
+    system(cmd);
 }
 
-int totalchannels2 = 14; 
-for (int i = 0; i < totalchannels2; i++){
-    channel[i].channel_number = i + 1;
-    channel[i].frequency = 2412 + i * 5;
+// ─── HackRF RX Callback ──────────────────────────────────────────────────────
+
+// Called by HackRF with each buffer of IQ samples.
+// Computes average signal power and stores it in the matching channel slot.
+// In a full implementation you would tune the HackRF to each channel frequency
+// before reading samples; here we accumulate power across all samples.
+int rx_callback(hackrf_transfer *transfer) {
+    static int current_channel_idx = 0;
+
+    int8_t  *samples = (int8_t *)transfer->buffer;
+    int      len     = transfer->valid_length;
+    double   power   = 0.0;
+
+    // Compute mean power of IQ samples
+    for (int i = 0; i + 1 < len; i += 2) {
+        double I = samples[i];
+        double Q = samples[i + 1];
+        power += I * I + Q * Q;
+    }
+    power /= (len / 2);
+
+    // Store into current channel and advance
+    channels[current_channel_idx].sigstr = (float)power;
+    current_channel_idx = (current_channel_idx + 1) % TOTAL_CHANNELS;
+
+    return 0;  // 0 = keep receiving
 }
 
+// ─── HackRF Scan ─────────────────────────────────────────────────────────────
 
+// Opens HackRF, tunes to each 2.4GHz channel, collects samples, then stops.
+void scan_spectrum(void) {
+    hackrf_device *device = NULL;
+    int ret;
+
+    ret = hackrf_init();
+    if (ret != HACKRF_SUCCESS) {
+        fprintf(stderr, "[!] hackrf_init failed: %s\n", hackrf_error_name(ret));
+        return;
+    }
+
+    ret = hackrf_open(&device);
+    if (ret != HACKRF_SUCCESS) {
+        fprintf(stderr, "[!] hackrf_open failed: %s\n", hackrf_error_name(ret));
+        hackrf_exit();
+        return;
+    }
+
+    hackrf_set_sample_rate(device, SAMPLE_RATE);
+    hackrf_set_amp_enable(device, 0);
+    hackrf_set_lna_gain(device, BASEBAND_GAIN);
+    hackrf_set_vga_gain(device, IF_GAIN);
+
+    // Tune to each channel and collect a short burst of samples
+    for (int i = 0; i < TOTAL_CHANNELS; i++) {
+        uint64_t freq_hz = (uint64_t)(channels[i].frequency * 1e6);
+        hackrf_set_freq(device, freq_hz);
+
+        hackrf_start_rx(device, rx_callback, NULL);
+        // Collect for ~100ms per channel
+        struct timespec ts = {0, 100000000L};
+        nanosleep(&ts, NULL);
+        hackrf_stop_rx(device);
+
+        printf("[scan] Channel %2d (%.0f MHz) — power: %.2f\n",
+               channels[i].channel_number,
+               channels[i].frequency,
+               channels[i].sigstr);
+    }
+
+    hackrf_close(device);
+    hackrf_exit();
+}
+
+// ─── Deauth Detection ────────────────────────────────────────────────────────
+
+// Call this with each incoming deauth frame's source MAC address.
+// Returns true if an attack threshold is exceeded.
+bool check_deauth(uint8_t *incoming_mac) {
+    bool found_match  = false;
+    int  matched_index = -1;
+
+    // Search for existing MAC in our table
+    for (int i = 0; i < frame_count; i++) {
+        if (memcmp(frame[i].mac, incoming_mac, 6) == 0) {
+            frame[i].counter++;
+            found_match    = true;
+            matched_index  = i;
+            break;
+        }
+    }
+
+    // New MAC — add it if there's space
+    if (!found_match) {
+        if (frame_count >= MAX_FRAMES) {
+            fprintf(stderr, "[!] Frame table full, cannot track new MAC.\n");
+            return false;
+        }
+        memcpy(frame[frame_count].mac, incoming_mac, 6);
+        frame[frame_count].counter    = 1;
+        frame[frame_count].first_seen = time(NULL);
+        matched_index                 = frame_count;
+        frame_count++;
+    }
+
+    // Check if threshold exceeded within time window
+    time_t now          = time(NULL);
+    time_t elapsed_time = now - frame[matched_index].first_seen;
+
+    if (frame[matched_index].counter >= DEAUTH_THRESHOLD && elapsed_time <= TIME_WINDOW) {
+        printf("[!!!] DEAUTH ATTACK DETECTED from MAC %02X:%02X:%02X:%02X:%02X:%02X\n",
+               incoming_mac[0], incoming_mac[1], incoming_mac[2],
+               incoming_mac[3], incoming_mac[4], incoming_mac[5]);
+        // Reset counter so we don't keep triggering
+        frame[matched_index].counter    = 0;
+        frame[matched_index].first_seen = now;
+        return true;
+    }
+
+    // Reset counter if outside the time window (stale data)
+    if (elapsed_time > TIME_WINDOW) {
+        frame[matched_index].counter    = 1;
+        frame[matched_index].first_seen = now;
+    }
+
+    return false;
+}
+
+// ─── Main ────────────────────────────────────────────────────────────────────
+
+int main(void) {
+    printf("[*] Initialising channel list...\n");
+    init_channels();
+
+    printf("[*] Scanning spectrum with HackRF...\n");
+    scan_spectrum();
+
+    // ── Demo: simulate a deauth attack from a fake MAC ──
+    // In production this would come from a packet capture loop
+    // (e.g. libpcap listening on a monitor-mode interface).
+    printf("[*] Simulating deauth flood for demonstration...\n");
+    uint8_t attacker_mac[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01};
+
+    for (int i = 0; i < 55; i++) {
+        if (check_deauth(attacker_mac)) {
+            // Attack confirmed — pick cleanest channel and hop
+            int clean = get_cleanest_channel();
+            switch_channel(clean);
+            break;
+        }
+    }
+
+    printf("[*] Done.\n");
+    return 0;
+}
 
 
 /*
