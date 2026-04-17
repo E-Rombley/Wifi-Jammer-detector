@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <math.h>
+#include <stdbool.h>
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
