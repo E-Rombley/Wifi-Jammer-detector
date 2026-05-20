@@ -37,36 +37,42 @@ def switch_channel():
 async def monitor():
     global start_time
 
-    print(f"[*] Connecting to OpenWebRX...")
     print(f"[*] Threshold: {THRESHOLD_DBM} dBm for {TRIGGER_SECONDS} seconds")
     print(f"[*] Current channel: {channels[current_index]}")
 
-    async with websockets.connect(OPENWEBRX_WS, ping_interval=20, ping_timeout=60) as ws:
-        await ws.send("SERVER DE CLIENT client=openwebrx.js type=receiver")
-        print("[*] Connected. Monitoring 2.4GHz band...\n")
+    while True:
+        try:
+            print(f"[*] Connecting to OpenWebRX...")
+            async with websockets.connect(OPENWEBRX_WS, ping_interval=20, ping_timeout=60) as ws:
+                await ws.send("SERVER DE CLIENT client=openwebrx.js type=receiver")
+                print("[*] Connected. Monitoring 2.4GHz band...\n")
 
-        while True:
-            msg = await ws.recv()
+                while True:
+                    msg = await ws.recv()
 
-            if not isinstance(msg, bytes) or msg[0] != 1:
-                continue
+                    if not isinstance(msg, bytes) or msg[0] != 1:
+                        continue
 
-            data = np.frombuffer(msg[1:], dtype=np.uint8)
-            dbm = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
-            avg = dbm.mean()
+                    data = np.frombuffer(msg[1:], dtype=np.uint8)
+                    dbm = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
+                    avg = dbm.mean()
 
-            if avg > THRESHOLD_DBM:
-                if start_time is None:
-                    start_time = time.time()
-                    print(f"[!] High power detected: {avg:.2f} dBm. Starting timer...")
-                elif time.time() - start_time >= TRIGGER_SECONDS:
-                    switch_channel()
-                    start_time = None
-            else:
-                if start_time is not None:
-                    print(f"[*] Signal back to normal: {avg:.2f} dBm. Resetting timer.")
-                start_time = None
+                    if avg > THRESHOLD_DBM:
+                        if start_time is None:
+                            start_time = time.time()
+                            print(f"[!] High power detected: {avg:.2f} dBm. Starting timer...")
+                        elif time.time() - start_time >= TRIGGER_SECONDS:
+                            switch_channel()
+                            start_time = None
+                    else:
+                        if start_time is not None:
+                            print(f"[*] Signal back to normal: {avg:.2f} dBm. Resetting timer.")
+                        start_time = None
 
+        except Exception as e:
+            print(f"[!] Connection lost: {e}. Reconnecting in 5 seconds...")
+            start_time = None
+            await asyncio.sleep(5)
 
 if __name__ == "__main__":
     asyncio.run(monitor())
