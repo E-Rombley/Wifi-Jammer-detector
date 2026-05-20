@@ -56,7 +56,7 @@ async def monitor():
                     data = np.frombuffer(msg[1:], dtype=np.uint8)
                     dbm = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
                     avg = dbm.mean()
-
+                    print(f"[*] Current avg: {avg:.2f} dBm")
                     if avg > THRESHOLD_DBM:
                         if start_time is None:
                             start_time = time.time()
