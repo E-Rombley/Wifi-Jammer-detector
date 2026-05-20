@@ -43,7 +43,7 @@ def main():
     print(f"[*] Threshold: {THRESHOLD_DBM} dBm for {TRIGGER_SECONDS} seconds")
 
     process = subprocess.Popen(
-        ["hackrf_sweep", "-f", "2400:2500", "-l", "40", "-g", "40", "-n", "8192", "-w", "100000"],
+        ["hackrf_sweep", "-f", "2400:2500", "-l", "40", "-g", "40", "-w", "100000"],
         stdout=subprocess.PIPE,
         text=True
     )
