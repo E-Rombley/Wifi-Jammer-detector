@@ -10,7 +10,7 @@ import time
 OPENWEBRX_WS = "ws://192.168.1.140:8073/ws/"
 ROUTER_IP = "192.168.1.1"
 SSH_KEY = "/home/guy/.ssh/openWrt_key"
-THRESHOLD_DBM = -60
+THRESHOLD_DBM = -63
 TRIGGER_SECONDS = 3
 WATERFALL_MIN = -88
 WATERFALL_MAX = -20
@@ -56,7 +56,7 @@ async def monitor():
                     data = np.frombuffer(msg[1:], dtype=np.uint8)
                     dbm = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
                     avg = dbm.mean()
-                    print(f"[*] Current avg: {avg:.2f} dBm")
+                   # print(f"[*] Current avg: {avg:.2f} dBm")
                     if avg > THRESHOLD_DBM:
                         if start_time is None:
                             start_time = time.time()
