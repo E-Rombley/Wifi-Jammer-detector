@@ -41,7 +41,7 @@ async def monitor():
     print(f"[*] Threshold: {THRESHOLD_DBM} dBm for {TRIGGER_SECONDS} seconds")
     print(f"[*] Current channel: {channels[current_index]}")
 
-    async with websockets.connect(OPENWEBRX_WS) as ws:
+    async with websockets.connect(OPENWEBRX_WS, ping_interval=20, ping_timeout=60) as ws:
         await ws.send("SERVER DE CLIENT client=openwebrx.js type=receiver")
         print("[*] Connected. Monitoring 2.4GHz band...\n")
 
