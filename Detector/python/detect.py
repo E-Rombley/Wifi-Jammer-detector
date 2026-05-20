@@ -1,72 +1,72 @@
 #!/usr/bin/env python3
 
+import asyncio
+import websockets
+import numpy as np
 import subprocess
 import time
 
 # config
+OPENWEBRX_WS = "ws://192.168.1.140:8073/ws/"
 ROUTER_IP = "192.168.1.1"
 SSH_KEY = "/home/guy/.ssh/openWrt_key"
 THRESHOLD_DBM = -20
 TRIGGER_SECONDS = 3
+WATERFALL_MIN = -88
+WATERFALL_MAX = -20
+
 channels = [1, 6, 11]
 current_index = 0
-
 start_time = None
 
 
-def switch_channel(channel):
-    print(f"[!] Jamming detected. Switching to channel {channel}...")
+def switch_channel():
+    global current_index
+    current_index = (current_index + 1) % len(channels)
+    next_channel = channels[current_index]
+    prev_channel = channels[(current_index - 1) % len(channels)]
+    print(f"[!] Jamming detected. Switching from channel {prev_channel} to channel {next_channel}...")
     subprocess.run([
         "ssh", "-i", SSH_KEY,
         f"root@{ROUTER_IP}",
-        f"uci set wireless.@wifi-device[0].channel={channel} && uci commit wireless && wifi reload"
+        f"uci set wireless.@wifi-device[0].channel={next_channel} && uci commit wireless && wifi reload"
     ])
-    print(f"[+] Switched to channel {channel}.")
+    print(f"[+] Now on channel {next_channel}.")
 
 
-def parse_average(line):
-    parts = line.strip().split(",")
-    if len(parts) < 7:
-        return None
-    try:
-        values = [float(x) for x in parts[6:]]
-        return sum(values) / len(values)
-    except ValueError:
-        return None
+async def monitor():
+    global start_time
 
-
-def main():
-    global current_index, start_time
-
-    print(f"[*] Starting jammer detection on 2.4GHz band...")
-    print(f"[*] Current channel: {channels[current_index]}")
+    print(f"[*] Connecting to OpenWebRX...")
     print(f"[*] Threshold: {THRESHOLD_DBM} dBm for {TRIGGER_SECONDS} seconds")
+    print(f"[*] Current channel: {channels[current_index]}")
 
-    process = subprocess.Popen(
-        ["hackrf_sweep", "-f", "2400:2500", "-l", "40", "-g", "40", "-w", "100000"],
-        stdout=subprocess.PIPE,
-        text=True
-    )
+    async with websockets.connect(OPENWEBRX_WS) as ws:
+        await ws.send("SERVER DE CLIENT client=openwebrx.js type=receiver")
+        print("[*] Connected. Monitoring 2.4GHz band...\n")
 
-    for line in process.stdout:
-        avg = parse_average(line)
-        if avg is None:
-            continue
+        while True:
+            msg = await ws.recv()
 
-        if avg > THRESHOLD_DBM:
-            if start_time is None:
-                start_time = time.time()
-                print(f"[!] High power detected: {avg:.2f} dBm. Starting timer...")
-            elif time.time() - start_time >= TRIGGER_SECONDS:
-                current_index = (current_index + 1) % len(channels)
-                next_channel = channels[current_index]
-                switch_channel(next_channel)
+            if not isinstance(msg, bytes) or msg[0] != 1:
+                continue
+
+            data = np.frombuffer(msg[1:], dtype=np.uint8)
+            dbm = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
+            avg = dbm.mean()
+
+            if avg > THRESHOLD_DBM:
+                if start_time is None:
+                    start_time = time.time()
+                    print(f"[!] High power detected: {avg:.2f} dBm. Starting timer...")
+                elif time.time() - start_time >= TRIGGER_SECONDS:
+                    switch_channel()
+                    start_time = None
+            else:
+                if start_time is not None:
+                    print(f"[*] Signal back to normal: {avg:.2f} dBm. Resetting timer.")
                 start_time = None
-        else:
-            if start_time is not None:
-                print(f"[*] Signal dropped back to normal: {avg:.2f} dBm. Resetting timer.")
-            start_time = None
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(monitor())
