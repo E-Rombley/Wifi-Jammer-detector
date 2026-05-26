@@ -6,46 +6,63 @@ import numpy as np
 import subprocess
 import time
 
-# config
-OPENWEBRX_WS = "ws://192.168.1.140:8073/ws/"
-ROUTER_IP = "192.168.1.1"
-SSH_KEY = "/home/guy/.ssh/openWrt_key"
-THRESHOLD_DBM = -20
+# ─── Config ───────────────────────────────────────────────────────────────────
+
+ROUTER_IP       = "192.168.1.1"
+SSH_KEY         = "/home/guy/.ssh/openWrt_key"
+THRESHOLD_DBM   = -20
 TRIGGER_SECONDS = 3
-WATERFALL_MIN = -88
-WATERFALL_MAX = -20
+WATERFALL_MIN   = -88
+WATERFALL_MAX   = -20
 
-channels = [1, 6, 11]
-current_index = 0
-start_time = None
+BANDS = {
+    "2.4GHz": {
+        "ws":          "ws://192.168.1.140:8073/ws/",   # OpenWebRX tuned to 2.4GHz
+        "channels":    [1, 6, 11],
+        "device_idx":  0,                               # OpenWRT wifi-device[0]
+        "current_idx": 0,
+        "start_time":  None,
+    },
+    "5GHz": {
+        "ws":          "ws://192.168.1.140:8074/ws/",   # OpenWebRX tuned to 5GHz (second instance)
+        "channels":    [36, 40, 44, 48, 149, 153, 157, 161],
+        "device_idx":  1,                               # OpenWRT wifi-device[1]
+        "current_idx": 0,
+        "start_time":  None,
+    },
+}
 
+# ─── Channel switch ───────────────────────────────────────────────────────────
 
-def switch_channel():
-    global current_index
-    current_index = (current_index + 1) % len(channels)
-    next_channel = channels[current_index]
-    prev_channel = channels[(current_index - 1) % len(channels)]
-    print(f"[!] Jamming detected. Switching from channel {prev_channel} to channel {next_channel}...")
+def switch_channel(band_name: str, band: dict) -> None:
+    band["current_idx"] = (band["current_idx"] + 1) % len(band["channels"])
+    next_ch = band["channels"][band["current_idx"]]
+    prev_ch = band["channels"][(band["current_idx"] - 1) % len(band["channels"])]
+    dev     = band["device_idx"]
+
+    print(f"[!] [{band_name}] Jamming detected — switching ch{prev_ch} → ch{next_ch}")
     subprocess.run([
         "ssh", "-i", SSH_KEY,
         f"root@{ROUTER_IP}",
-        f"uci set wireless.@wifi-device[0].channel={next_channel} && uci commit wireless && wifi reload"
+        f"uci set wireless.@wifi-device[{dev}].channel={next_ch} && "
+        f"uci commit wireless && wifi reload"
     ])
-    print(f"[+] Now on channel {next_channel}.")
+    print(f"[+] [{band_name}] Now on channel {next_ch}.")
 
+# ─── Per-band monitor ─────────────────────────────────────────────────────────
 
-async def monitor():
-    global start_time
-
-    print(f"[*] Threshold: {THRESHOLD_DBM} dBm for {TRIGGER_SECONDS} seconds")
-    print(f"[*] Current channel: {channels[current_index]}")
+async def monitor_band(band_name: str, band: dict) -> None:
+    print(f"[*] [{band_name}] Threshold: {THRESHOLD_DBM} dBm for {TRIGGER_SECONDS}s  "
+          f"| starting ch: {band['channels'][band['current_idx']]}")
 
     while True:
         try:
-            print(f"[*] Connecting to OpenWebRX...")
-            async with websockets.connect(OPENWEBRX_WS, ping_interval=20, ping_timeout=60) as ws:
+            print(f"[*] [{band_name}] Connecting to {band['ws']} ...")
+            async with websockets.connect(
+                band["ws"], ping_interval=20, ping_timeout=60
+            ) as ws:
                 await ws.send("SERVER DE CLIENT client=openwebrx.js type=receiver")
-                print("[*] Connected. Monitoring 2.4GHz band...\n")
+                print(f"[*] [{band_name}] Connected. Monitoring...\n")
 
                 while True:
                     msg = await ws.recv()
@@ -54,25 +71,32 @@ async def monitor():
                         continue
 
                     data = np.frombuffer(msg[1:], dtype=np.uint8)
-                    dbm = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
-                    avg = dbm.mean()
-                   # print(f"[*] Current avg: {avg:.2f} dBm")
+                    dbm  = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
+                    avg  = float(dbm.mean())
+
                     if avg > THRESHOLD_DBM:
-                        if start_time is None:
-                            start_time = time.time()
-                            print(f"[!] High power detected: {avg:.2f} dBm. Starting timer...")
-                        elif time.time() - start_time >= TRIGGER_SECONDS:
-                            switch_channel()
-                            start_time = None
+                        if band["start_time"] is None:
+                            band["start_time"] = time.time()
+                            print(f"[!] [{band_name}] High power: {avg:.2f} dBm — timer started")
+                        elif time.time() - band["start_time"] >= TRIGGER_SECONDS:
+                            switch_channel(band_name, band)
+                            band["start_time"] = None
                     else:
-                        if start_time is not None:
-                            print(f"[*] Signal back to normal: {avg:.2f} dBm. Resetting timer.")
-                        start_time = None
+                        if band["start_time"] is not None:
+                            print(f"[*] [{band_name}] Signal normal: {avg:.2f} dBm — timer reset")
+                        band["start_time"] = None
 
         except Exception as e:
-            print(f"[!] Connection lost: {e}. Reconnecting in 5 seconds...")
-            start_time = None
+            print(f"[!] [{band_name}] Connection lost: {e} — retrying in 5s")
+            band["start_time"] = None
             await asyncio.sleep(5)
 
+# ─── Entry point ─────────────────────────────────────────────────────────────
+
+async def main() -> None:
+    await asyncio.gather(*(
+        monitor_band(name, band) for name, band in BANDS.items()
+    ))
+
 if __name__ == "__main__":
-    asyncio.run(monitor())
+    asyncio.run(main())
