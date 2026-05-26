@@ -17,16 +17,9 @@ WATERFALL_MAX   = -20
 
 BANDS = {
     "2.4GHz": {
-        "ws":          "ws://192.168.1.140:8073/ws/",   # OpenWebRX tuned to 2.4GHz
+        "ws":          "ws://192.168.1.140:8073/ws/",
         "channels":    [1, 6, 11],
-        "device_idx":  0,                               # OpenWRT wifi-device[0]
-        "current_idx": 0,
-        "start_time":  None,
-    },
-    "5GHz": {
-        "ws":          "ws://192.168.1.140:8074/ws/",   # OpenWebRX tuned to 5GHz (second instance)
-        "channels":    [36, 40, 44, 48, 149, 153, 157, 161],
-        "device_idx":  1,                               # OpenWRT wifi-device[1]
+        "device_idx":  0,
         "current_idx": 0,
         "start_time":  None,
     },
