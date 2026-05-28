@@ -20,7 +20,7 @@ BANDS = {
         "ws":          "ws://192.168.1.140:8073/ws/",
         "channels":    [1, 6, 11],
         "device_idx":  0,
-        "current_idx": 0,
+        "current_idx": 2,
         "start_time":  None,
     },
 }
