@@ -12,8 +12,6 @@ ROUTER_IP       = "192.168.1.1"
 SSH_KEY         = "/home/guy/.ssh/openWrt_key"
 THRESHOLD_DBM   = -50
 TRIGGER_SECONDS = 2
-WATERFALL_MIN   = -88
-WATERFALL_MAX   = -20
 
 BANDS = {
     "2.4GHz": {
@@ -79,9 +77,8 @@ async def monitor_band(band_name: str, band: dict) -> None:
                     if not isinstance(msg, bytes) or msg[0] != 1:
                         continue
 
-                    data = np.frombuffer(msg[1:], dtype=np.uint8)
-                    dbm  = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
-                    avg  = float(dbm.mean())
+                    data = np.frombuffer(msg[1:], dtype=np.float32)
+                    avg  = float(data.mean())
 
                     now = time.time()
                     if now - last_print >= 2:
