@@ -62,6 +62,7 @@ def switch_channel(band_name: str, band: dict) -> None:
 async def monitor_band(band_name: str, band: dict) -> None:
     print(f"[*] [{band_name}] Threshold: {THRESHOLD_DBM} dBm for {TRIGGER_SECONDS}s  "
           f"| starting ch: {band['channels'][band['current_idx']]}")
+    last_print = 0
 
     while True:
         try:
@@ -81,6 +82,11 @@ async def monitor_band(band_name: str, band: dict) -> None:
                     data = np.frombuffer(msg[1:], dtype=np.uint8)
                     dbm  = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
                     avg  = float(dbm.mean())
+
+                    now = time.time()
+                    if now - last_print >= 2:
+                        print(f"[~] [{band_name}] avg: {avg:.2f} dBm  (threshold: {THRESHOLD_DBM})")
+                        last_print = now
 
                     if avg > THRESHOLD_DBM:
                         if band["start_time"] is None:
