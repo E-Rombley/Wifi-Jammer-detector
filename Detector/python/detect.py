@@ -11,18 +11,23 @@ import time
 ROUTER_IP       = "192.168.1.1"
 SSH_KEY         = "/home/guy/.ssh/openWrt_key"
 THRESHOLD_DBM   = -37
-TRIGGER_SECONDS = 0.5
+TRIGGER_SECONDS = 0.1
 WATERFALL_MIN   = -88
 WATERFALL_MAX   = -22
 MONITOR_BW_HZ   = 3.5e6  # monitor ±3.5 MHz around the channel centre
+
+PING_HOST       = "192.168.1.1"
+PING_FAILS      = 3       # consecutive failures before switching
+SWITCH_COOLDOWN = 5       # seconds to ignore further triggers after a switch
 
 BANDS = {
     "2.4GHz": {
         "ws":          "ws://192.168.1.140:8073/ws/",
         "channels":    [1, 6, 11],
         "device_idx":  0,
-        "current_idx": 0,
-        "start_time":  None,
+        "current_idx":    0,
+        "start_time":     None,
+        "last_switch":    0,
         "samp_rate":   20e6,      # Hz — 20 MS/s = 20 MHz window
         "channel_freqs": {        # standard 2.4 GHz channel centres
             1:  2412e6,
@@ -50,6 +55,9 @@ def resolve_start_index(band: dict) -> int:
 # ─── Channel switch ───────────────────────────────────────────────────────────
 
 def switch_channel(band_name: str, band: dict) -> None:
+    if time.time() - band["last_switch"] < SWITCH_COOLDOWN:
+        return
+    band["last_switch"] = time.time()
     band["current_idx"] = (band["current_idx"] + 1) % len(band["channels"])
     next_ch = band["channels"][band["current_idx"]]
     prev_ch = band["channels"][(band["current_idx"] - 1) % len(band["channels"])]
@@ -64,6 +72,28 @@ def switch_channel(band_name: str, band: dict) -> None:
         f"uci commit wireless && wifi reload"
     ])
     print(f"[+] [{band_name}] Now on channel {next_ch} — switch OpenWebRX to {next_freq_mhz:.0f} MHz profile")
+
+# ─── Connectivity watchdog ────────────────────────────────────────────────────
+
+async def monitor_connectivity(band_name: str, band: dict) -> None:
+    fails = 0
+    while True:
+        proc = await asyncio.create_subprocess_exec(
+            "ping", "-c", "1", "-W", "1", PING_HOST,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            fails += 1
+            print(f"[!] [{band_name}] Ping fail {fails}/{PING_FAILS}")
+            if fails >= PING_FAILS:
+                print(f"[!] [{band_name}] WiFi down — switching channel")
+                switch_channel(band_name, band)
+                fails = 0
+        else:
+            fails = 0
+        await asyncio.sleep(1)
 
 # ─── Per-band monitor ─────────────────────────────────────────────────────────
 
@@ -131,7 +161,9 @@ async def main() -> None:
         band["current_idx"] = resolve_start_index(band)
         print(f"[*] [{name}] Router is on channel {band['channels'][band['current_idx']]}")
     await asyncio.gather(*(
-        monitor_band(name, band) for name, band in BANDS.items()
+        coro
+        for name, band in BANDS.items()
+        for coro in (monitor_band(name, band), monitor_connectivity(name, band))
     ))
 
 if __name__ == "__main__":
