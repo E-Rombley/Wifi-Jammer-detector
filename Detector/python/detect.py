@@ -13,7 +13,7 @@ SSH_KEY         = "/home/guy/.ssh/openWrt_key"
 THRESHOLD_DBM   = -50
 TRIGGER_SECONDS = 1
 WATERFALL_MIN   = -88
-WATERFALL_MAX   = 0
+WATERFALL_MAX   = -22
 MONITOR_BW_HZ   = 3.5e6  # monitor ±3.5 MHz around the channel centre
 
 BANDS = {
