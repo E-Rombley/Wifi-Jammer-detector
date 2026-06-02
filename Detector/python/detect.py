@@ -80,8 +80,8 @@ async def monitor_band(band_name: str, band: dict) -> None:
                         continue
 
                     data = np.frombuffer(msg[1:], dtype=np.uint8)
-                    avg  = float((data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN).mean() \
-                           if False else float(((data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN).mean())
+                    dbm  = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
+                    avg  = float(dbm.mean())
 
                     now = time.time()
                     if now - last_print >= 2:
