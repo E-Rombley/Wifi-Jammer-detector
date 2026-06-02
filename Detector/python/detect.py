@@ -14,7 +14,7 @@ THRESHOLD_DBM   = -50
 TRIGGER_SECONDS = 1
 WATERFALL_MIN   = -88
 WATERFALL_MAX   = 0
-MONITOR_BW_HZ   = 1.5e6  # monitor ±1.5 MHz around the channel centre
+MONITOR_BW_HZ   = 3.5e6  # monitor ±3.5 MHz around the channel centre
 
 BANDS = {
     "2.4GHz": {
