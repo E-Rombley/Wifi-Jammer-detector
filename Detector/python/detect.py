@@ -77,7 +77,11 @@ async def monitor_band(band_name: str, band: dict) -> None:
                     if not isinstance(msg, bytes) or msg[0] != 1:
                         continue
 
-                    data = np.frombuffer(msg[1:], dtype=np.float32)
+                    raw = msg[1:]
+                    raw = raw[:len(raw) - len(raw) % 4]
+                    if not raw:
+                        continue
+                    data = np.frombuffer(raw, dtype=np.float32)
                     avg  = float(data.mean())
 
                     now = time.time()
