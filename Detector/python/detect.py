@@ -22,8 +22,12 @@ BANDS = {
         "device_idx":  0,
         "current_idx": 0,
         "start_time":  None,
-        "center_freq": 2437e6,   # Hz — match your OpenWebRX center freq
-        "samp_rate":   20e6,     # Hz — 20 MS/s = 20 MHz window
+        "samp_rate":   20e6,      # Hz — 20 MS/s = 20 MHz window
+        "channel_freqs": {        # standard 2.4 GHz channel centres
+            1:  2412e6,
+            6:  2437e6,
+            11: 2462e6,
+        },
     },
 }
 
@@ -50,14 +54,15 @@ def switch_channel(band_name: str, band: dict) -> None:
     prev_ch = band["channels"][(band["current_idx"] - 1) % len(band["channels"])]
     dev     = band["device_idx"]
 
-    print(f"[!] [{band_name}] Jamming detected — switching ch{prev_ch} → ch{next_ch}")
+    next_freq_mhz = band["channel_freqs"][next_ch] / 1e6
+    print(f"[!] [{band_name}] Jamming detected — switching ch{prev_ch} → ch{next_ch} ({next_freq_mhz:.0f} MHz)")
     subprocess.run([
         "ssh", "-i", SSH_KEY,
         f"root@{ROUTER_IP}",
         f"uci set wireless.@wifi-device[{dev}].channel={next_ch} && "
         f"uci commit wireless && wifi reload"
     ])
-    print(f"[+] [{band_name}] Now on channel {next_ch}.")
+    print(f"[+] [{band_name}] Now on channel {next_ch} — switch OpenWebRX to {next_freq_mhz:.0f} MHz profile")
 
 # ─── Per-band monitor ─────────────────────────────────────────────────────────
 
@@ -90,7 +95,9 @@ async def monitor_band(band_name: str, band: dict) -> None:
 
                     now = time.time()
                     if now - last_print >= 2:
-                        print(f"[~] [{band_name}] avg: {avg:.2f} dBm  (threshold: {THRESHOLD_DBM})")
+                        ch       = band["channels"][band["current_idx"]]
+                        ch_freq  = band["channel_freqs"][ch] / 1e6
+                        print(f"[~] [{band_name}] ch{ch} ({ch_freq:.0f} MHz)  avg: {avg:.2f} dBm  (threshold: {THRESHOLD_DBM})")
                         last_print = now
 
                     if avg > THRESHOLD_DBM:
