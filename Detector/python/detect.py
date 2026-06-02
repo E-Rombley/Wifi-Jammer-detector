@@ -20,10 +20,25 @@ BANDS = {
         "ws":          "ws://192.168.1.140:8073/ws/",
         "channels":    [1, 6, 11],
         "device_idx":  0,
-        "current_idx": 2,
+        "current_idx": 0,
         "start_time":  None,
     },
 }
+
+# ─── Startup channel probe ───────────────────────────────────────────────────
+
+def resolve_start_index(band: dict) -> int:
+    dev = band["device_idx"]
+    result = subprocess.run(
+        ["ssh", "-i", SSH_KEY, f"root@{ROUTER_IP}",
+         f"uci get wireless.@wifi-device[{dev}].channel"],
+        capture_output=True, text=True
+    )
+    try:
+        ch = int(result.stdout.strip())
+        return band["channels"].index(ch)
+    except (ValueError, IndexError):
+        return 0
 
 # ─── Channel switch ───────────────────────────────────────────────────────────
 
@@ -87,6 +102,9 @@ async def monitor_band(band_name: str, band: dict) -> None:
 # ─── Entry point ─────────────────────────────────────────────────────────────
 
 async def main() -> None:
+    for name, band in BANDS.items():
+        band["current_idx"] = resolve_start_index(band)
+        print(f"[*] [{name}] Router is on channel {band['channels'][band['current_idx']]}")
     await asyncio.gather(*(
         monitor_band(name, band) for name, band in BANDS.items()
     ))
