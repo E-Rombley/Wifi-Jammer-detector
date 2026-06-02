@@ -14,6 +14,7 @@ THRESHOLD_DBM   = -50
 TRIGGER_SECONDS = 2
 WATERFALL_MIN   = -88
 WATERFALL_MAX   = 0
+MONITOR_BW_HZ   = 1e6    # monitor ±1 MHz around the channel centre
 
 BANDS = {
     "2.4GHz": {
@@ -86,11 +87,17 @@ async def monitor_band(band_name: str, band: dict) -> None:
                     if not isinstance(msg, bytes) or msg[0] != 1:
                         continue
 
-                    data = np.frombuffer(msg[1:], dtype=np.uint8)
-                    # trim the outer 10% of bins — SDR filter rolloff makes edges noisy
-                    n    = len(data)
-                    trim = n // 10
-                    dbm  = (data[trim:n - trim] / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
+                    data      = np.frombuffer(msg[1:], dtype=np.uint8)
+                    n         = len(data)
+                    ch        = band["channels"][band["current_idx"]]
+                    cf        = band["channel_freqs"][ch]
+                    hz_per_bin = band["samp_rate"] / n
+                    band_start = cf - band["samp_rate"] / 2
+                    lo = max(0, int((cf - MONITOR_BW_HZ - band_start) / hz_per_bin))
+                    hi = min(n, int((cf + MONITOR_BW_HZ - band_start) / hz_per_bin))
+                    if lo >= hi:
+                        continue
+                    dbm  = (data[lo:hi] / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
                     avg  = float(dbm.mean())
 
                     now = time.time()
