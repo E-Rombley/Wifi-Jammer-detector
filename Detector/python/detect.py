@@ -10,7 +10,7 @@ import time
 
 ROUTER_IP       = "192.168.1.1"
 SSH_KEY         = "/home/guy/.ssh/openWrt_key"
-THRESHOLD_DBM   = -37
+THRESHOLD_DBM   = -38
 TRIGGER_SECONDS = 0.1
 WATERFALL_MIN   = -88
 WATERFALL_MAX   = -22
