@@ -11,7 +11,7 @@ import time
 ROUTER_IP       = "192.168.1.1"
 SSH_KEY         = "/home/guy/.ssh/openWrt_key"
 THRESHOLD_DBM   = -37
-TRIGGER_SECONDS = 1
+TRIGGER_SECONDS = 0.5
 WATERFALL_MIN   = -88
 WATERFALL_MAX   = -22
 MONITOR_BW_HZ   = 3.5e6  # monitor ±3.5 MHz around the channel centre
