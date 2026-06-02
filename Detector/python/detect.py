@@ -10,10 +10,10 @@ import time
 
 ROUTER_IP       = "192.168.1.1"
 SSH_KEY         = "/home/guy/.ssh/openWrt_key"
-THRESHOLD_DBM   = -83
+THRESHOLD_DBM   = -60
 TRIGGER_SECONDS = 3
 WATERFALL_MIN   = -88
-WATERFALL_MAX   = -83
+WATERFALL_MAX   = -20
 
 BANDS = {
     "2.4GHz": {
