@@ -22,6 +22,8 @@ BANDS = {
         "device_idx":  0,
         "current_idx": 0,
         "start_time":  None,
+        "center_freq": 2437e6,   # Hz — match your OpenWebRX center freq
+        "samp_rate":   20e6,     # Hz — 20 MS/s = 20 MHz window
     },
 }
 
@@ -80,7 +82,10 @@ async def monitor_band(band_name: str, band: dict) -> None:
                         continue
 
                     data = np.frombuffer(msg[1:], dtype=np.uint8)
-                    dbm  = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
+                    # trim the outer 10% of bins — SDR filter rolloff makes edges noisy
+                    n    = len(data)
+                    trim = n // 10
+                    dbm  = (data[trim:n - trim] / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
                     avg  = float(dbm.mean())
 
                     now = time.time()
