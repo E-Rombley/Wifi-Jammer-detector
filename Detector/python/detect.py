@@ -80,20 +80,18 @@ async def monitor_band(band_name: str, band: dict) -> None:
 
                     data = np.frombuffer(msg[1:], dtype=np.uint8)
                     dbm  = (data / 255.0) * (WATERFALL_MAX - WATERFALL_MIN) + WATERFALL_MIN
-                    peak = float(dbm.max())  # FIX: use peak instead of mean
+                    avg  = float(dbm.mean())
 
-                    print(f"[DEBUG] [{band_name}] peak: {peak:.2f} dBm")
-
-                    if peak >= THRESHOLD_DBM:  # FIX: >= instead of >
+                    if avg > THRESHOLD_DBM:
                         if band["start_time"] is None:
                             band["start_time"] = time.time()
-                            print(f"[!] [{band_name}] High power: {peak:.2f} dBm — timer started")
+                            print(f"[!] [{band_name}] High power: {avg:.2f} dBm — timer started")
                         elif time.time() - band["start_time"] >= TRIGGER_SECONDS:
                             switch_channel(band_name, band)
                             band["start_time"] = None
                     else:
                         if band["start_time"] is not None:
-                            print(f"[*] [{band_name}] Signal normal: {peak:.2f} dBm — timer reset")
+                            print(f"[*] [{band_name}] Signal normal: {avg:.2f} dBm — timer reset")
                         band["start_time"] = None
 
         except Exception as e:
